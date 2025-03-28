@@ -135,7 +135,7 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
-static/images/*
-!static/images/.gitkeep
-static/images/*.jpg
-static/images/*.png
+public/images/*
+!public/images/.gitkeep
+public/images/*.jpg
+public/images/*.png
