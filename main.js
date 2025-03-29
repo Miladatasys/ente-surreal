@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import { createLoader } from "./components/Loader";
 import { createPoemPresentation } from "./components/PoemPresentation";
-import { createInterface } from "/components/Interface";
+import { createInterface } from "./components/Interface";
 import resetViewManager from "./components/ResetViewManager";
+import ImageSystem from "./components/ImageSystem/ImageSystem";
 
 // Initialize with theme from URL if present
 const urlParams = new URLSearchParams(window.location.search);
@@ -24,6 +25,9 @@ const poemPresentation = createPoemPresentation();
 const scene = new THREE.Scene();
 window.scene = scene;
 
+// Initialize Image System
+const imageSystem = new ImageSystem(scene);
+
 // Set background color based on theme
 function updateSceneBackground() {
   const isDarkTheme =
@@ -34,22 +38,25 @@ function updateSceneBackground() {
 }
 updateSceneBackground();
 
+// Camera setup
 const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
   0.1,
   1000
 );
-camera.position.z = 5;
+camera.position.set(0, 0, 15);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// Renderer setup
+const renderer = new THREE.WebGLRenderer({ 
+  antialias: true,
+  powerPreference: "high-performance"
+});
 renderer.setSize(window.innerWidth, window.innerHeight);
-window.renderer = renderer;
-
-// Add renderer after interface
+renderer.setPixelRatio(window.devicePixelRatio);
 document.body.appendChild(renderer.domElement);
 
-// Observe document class changes for theme changes
+// Theme management
 const observer = new MutationObserver((mutations) => {
   mutations.forEach((mutation) => {
     if (mutation.attributeName === "class") {
@@ -57,73 +64,72 @@ const observer = new MutationObserver((mutations) => {
     }
   });
 });
-
 observer.observe(document.documentElement, { attributes: true });
-
-// Listen for theme change event
 document.addEventListener("themechange", updateSceneBackground);
 
-// Show loader
+// Load sequence
 loader.show();
 
-// Simulate loading
-setTimeout(() => {
-  loader.hide();
+setTimeout(async () => {
+  try {
+    loader.hide();
+    poemPresentation.show();
 
-  // Show poem
-  poemPresentation.show();
-
-  // When poem completes, initialize image counter
-  poemPresentation.onComplete = () => {
-    interfaceControls.initImageCounter();
-    loadImages();
-  };
+    poemPresentation.onComplete = async () => {
+      try {
+        await imageSystem.initialize();
+        interfaceControls.initImageCounter();
+        interfaceControls.updateImageCounter(1, imageSystem.totalImages);
+        
+        // Initial camera position
+        camera.position.set(0, 0, 15);
+        camera.lookAt(0, 0, 0);
+        
+      } catch (error) {
+        console.error("Image system initialization failed:", error);
+      }
+    };
+  } catch (error) {
+    console.error("Loading sequence failed:", error);
+  }
 }, 3000);
 
-// Image handling
-let currentImageIndex = 0;
-const totalImages = 5; // Example with 5 images
+// Navigation controls
+document.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowRight") {
+    const newIndex = imageSystem.navigate(1);
+    interfaceControls.updateImageCounter(newIndex + 1, imageSystem.totalImages);
+  } else if (event.key === "ArrowLeft") {
+    const newIndex = imageSystem.navigate(-1);
+    interfaceControls.updateImageCounter(newIndex + 1, imageSystem.totalImages);
+  }
+});
 
-function loadImages() {
-  // First image load
-  setTimeout(() => {
-    currentImageIndex = 1;
-    interfaceControls.updateImageCounter(currentImageIndex, totalImages);
-    console.log(`Showing image ${currentImageIndex} of ${totalImages}`);
-  }, 1000);
-
-  // Keyboard navigation
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowRight" && currentImageIndex < totalImages) {
-      currentImageIndex++;
-      interfaceControls.updateImageCounter(currentImageIndex, totalImages);
-      console.log(`Showing image ${currentImageIndex} of ${totalImages}`);
-    } else if (event.key === "ArrowLeft" && currentImageIndex > 1) {
-      currentImageIndex--;
-      interfaceControls.updateImageCounter(currentImageIndex, totalImages);
-      console.log(`Showing image ${currentImageIndex} of ${totalImages}`);
-    }
-  });
-}
-
-// Handle window resize
+// Window resize handler
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  imageSystem.handleResize();
 });
 
 // Animation loop
 let animationFrameId;
 function animate() {
   animationFrameId = requestAnimationFrame(animate);
+  
+  // Smooth camera movements
+  camera.position.lerpVectors(camera.position, imageSystem.cameraTarget, 0.1);
+  camera.lookAt(scene.position);
+  
   renderer.render(scene, camera);
 }
 animate();
 
-// Cleanup on reset
+// Cleanup
 window.addEventListener('beforeunload', () => {
   if (animationFrameId) {
     cancelAnimationFrame(animationFrameId);
   }
+  imageSystem.cleanup();
 });
