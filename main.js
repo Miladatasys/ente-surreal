@@ -2,7 +2,6 @@ import * as THREE from "three";
 import { createLoader } from "./components/Loader";
 import { createPoemPresentation } from "./components/PoemPresentation";
 import { createInterface } from "./components/Interface";
-import resetViewManager from "./components/ResetViewManager";
 import ImageSystem from "./components/ImageSystem/ImageSystem";
 
 // Initialize with theme from URL if present
