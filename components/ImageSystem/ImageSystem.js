@@ -1,115 +1,161 @@
 import * as THREE from 'three';
 
 class ImageSystem {
-    constructor(scene) {
-        this.scene = scene;
-        this.images = [];
-        this.textures = [];
-        this.mesh = null;
-        this.currentIndex = 0;
-        this.cameraTarget = new THREE.Vector3();
-        this.totalImages = 0;
-        this.imagePlane = null;
+  constructor(scene) {
+    this.scene = scene;
+    this.images = [];
+    this.textures = [];
+    this.meshes = [];
+    this.currentIndex = 0;
+    this.totalImages = 0;
+    
+    // Configuración de visualización
+    this.horizontalScale = 0.015; // Escala para imágenes horizontales
+    this.verticalScale = 0.014;   // Escala diferente para verticales
+    this.spacing = 1.2;
+    
+    // Contenedor para el scroll
+    this.container = new THREE.Group();
+    this.scene.add(this.container);
+    this.targetX = 0;
+    this.scrollSpeed = 0.1;
+  }
+
+  async initialize(imagePaths = ['images/01.png', 'images/02.png', 'images/03.png']) {
+    try {
+      this.images = imagePaths;
+      this.totalImages = this.images.length;
+      
+      // Cargar todas las texturas
+      const textureLoader = new THREE.TextureLoader();
+      this.textures = await Promise.all(
+        this.images.map(img => textureLoader.loadAsync(img))
+      );
+      
+      // Configurar texturas
+      this.textures.forEach(texture => {
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+      });
+      
+      // Crear mallas de imágenes con tamaños específicos
+      this.createImageMeshesWithOriginalSizes();
+      
+      // Mostrar solo las 2 primeras inicialmente
+      this.updateVisibility();
+      
+    } catch (error) {
+      console.error('Error inicializando ImageSystem:', error);
+      throw error;
     }
+  }
 
-    async initialize() {
-        try {
-            this.images = [
-                'images/01.png',
-            ];
+  isVerticalImage(texture) {
+    return texture.image.height > texture.image.width;
+  }
 
-            this.totalImages = this.images.length;
+  createImageMeshesWithOriginalSizes() {
+    if (!this.textures.length) return;
+    
+    // Crear todas las imágenes con sus tamaños específicos
+    this.textures.forEach((texture, index) => {
+      let width, height;
+      
+      if (this.isVerticalImage(texture)) {
+        // Imagen vertical - mantener tamaño original
+        width = texture.image.width * this.verticalScale;
+        height = texture.image.height * this.verticalScale;
+      } else {
+        // Imagen horizontal - tamaño uniforme
+        width = this.textures[0].image.width * this.horizontalScale;
+        height = this.textures[0].image.height * this.horizontalScale;
+      }
+      
+      const material = new THREE.MeshBasicMaterial({ 
+        map: texture,
+        transparent: false,
+        side: THREE.DoubleSide
+      });
+      
+      const geometry = new THREE.PlaneGeometry(width, height);
+      const mesh = new THREE.Mesh(geometry, material);
+      
+      // Posicionar horizontalmente
+      const prevMesh = this.meshes[index - 1];
+      const prevWidth = prevMesh ? prevMesh.geometry.parameters.width : 0;
+      const prevPosition = prevMesh ? prevMesh.position.x + prevWidth/2 : 0;
+      
+      mesh.position.x = prevPosition + width/2 + (index > 0 ? this.spacing : 0);
+      mesh.visible = index < 2; // Solo visibles las 2 primeras
+      
+      this.container.add(mesh);
+      this.meshes.push(mesh);
+    });
+    
+    // Centrar el contenedor para mostrar las 2 primeras
+    this.centerContainer();
+  }
 
-            const textureLoader = new THREE.TextureLoader();
-            const texturePromises = this.images.map(image => textureLoader.loadAsync(image));
-            this.textures = await Promise.all(texturePromises);
+  updateVisibility() {
+    this.meshes.forEach((mesh, index) => {
+      // Mostrar actual + siguiente (máximo 2 visibles)
+      mesh.visible = (index === this.currentIndex) || 
+                    (index === this.currentIndex + 1);
+    });
+  }
 
-            this.textures.forEach(texture => {
-                texture.minFilter = THREE.LinearFilter;
-                texture.magFilter = THREE.LinearFilter;
-                texture.wrapS = THREE.ClampToEdgeWrapping;
-                texture.wrapT = THREE.ClampToEdgeWrapping;
-                texture.anisotropy = 16;
-            });
+  centerContainer() {
+    if (this.meshes.length < 2) return;
+    
+    // Calcular centro entre las dos primeras imágenes
+    const centerX = (this.meshes[0].position.x + this.meshes[1].position.x) / 2;
+    this.container.position.x = -centerX;
+    this.targetX = this.container.position.x;
+  }
 
-            const material = new THREE.MeshBasicMaterial({
-                map: this.textures[0],
-                transparent: false,
-                color: 0xffffff,
-            });
-            const geometry = new THREE.PlaneGeometry(1, 1);
-            this.mesh = new THREE.Mesh(geometry, material);
-            this.scene.add(this.mesh);
-            this.imagePlane = this.mesh;
-
-            this.adjustPlaneSize(0);
-            this.updateCameraTarget(0);
-            this.fadeInImage();
-        } catch (error) {
-            console.error('Error inicializando imágenes:', error);
-        }
+  scrollTo(index) {
+    if (index < 0 || index >= this.totalImages) return;
+    
+    this.currentIndex = index;
+    
+    // Calcular posición objetivo para centrar la imagen actual
+    const currentImg = this.meshes[index];
+    const nextImg = this.meshes[index + 1];
+    
+    if (currentImg && nextImg) {
+      // Centrar entre la actual y la siguiente
+      this.targetX = -(currentImg.position.x + nextImg.position.x) / 2;
+    } else if (currentImg) {
+      // Última imagen - centrarla
+      this.targetX = -currentImg.position.x;
     }
+    
+    // Actualizar visibilidad
+    this.updateVisibility();
+  }
 
-    adjustPlaneSize(index) {
-        if (this.textures[index] && this.textures[index].image) {
-            const image = this.textures[index].image;
-            const originalWidth = image.width;
-            const originalHeight = image.height;
+  scrollBy(direction) {
+    const newIndex = (this.currentIndex + direction + this.totalImages) % this.totalImages;
+    this.scrollTo(newIndex);
+    return newIndex;
+  }
 
-            const scaleFactor = 0.015; 
+  update() {
+    // Movimiento suave del scroll
+    this.container.position.x += (this.targetX - this.container.position.x) * this.scrollSpeed;
+  }
 
-            const planeWidth = originalWidth * scaleFactor;
-            const planeHeight = originalHeight * scaleFactor;
-
-            this.mesh.geometry.dispose();
-            this.mesh.geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
-        }
-    }
-
-    navigate(direction) {
-        if (this.textures.length === 0) return this.currentIndex;
-
-        this.currentIndex = (this.currentIndex + direction + this.textures.length) % this.textures.length;
-        this.mesh.material.map = this.textures[this.currentIndex];
-        this.mesh.material.needsUpdate = true;
-        this.adjustPlaneSize(this.currentIndex);
-        this.updateCameraTarget(this.currentIndex);
-        return this.currentIndex;
-    }
-
-    updateCameraTarget(index) {
-        if (this.mesh) {
-            this.cameraTarget.copy(this.mesh.position);
-            this.cameraTarget.z = 10; 
-        }
-    }
-
-    handleResize() {}
-
-    cleanup() {
-        this.textures.forEach(texture => texture.dispose());
-        if (this.mesh) {
-            this.mesh.geometry.dispose();
-            this.mesh.material.dispose();
-            this.scene.remove(this.mesh);
-        }
-        this.textures = [];
-        this.mesh = null;
-        this.imagePlane = null;
-    }
-
-    fadeInImage() {
-        if (!this.imagePlane) return;
-
-        let opacity = 0;
-        const interval = setInterval(() => {
-            opacity += 0.02;
-            this.imagePlane.material.opacity = opacity;
-            if (opacity >= 1) {
-                clearInterval(interval);
-            }
-        }, 20);
-    }
+  cleanup() {
+    this.meshes.forEach(mesh => {
+      mesh.geometry.dispose();
+      mesh.material.dispose();
+      this.container.remove(mesh);
+    });
+    this.textures.forEach(texture => texture.dispose());
+    this.scene.remove(this.container);
+  }
 }
 
 export default ImageSystem;
